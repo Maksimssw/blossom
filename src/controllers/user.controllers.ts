@@ -1,14 +1,16 @@
 import {Request, Response} from "express";
 import db from "../db";
-import {addUser, getUserByMail, IResult} from "./queries";
+import {addUser, getUserByMail} from "../queries";
 import bcrypt from 'bcrypt'
+import { Types } from 'mongoose'
+import jsw from 'jsonwebtoken'
 import {IUser} from "../types";
-
+import {throws} from "assert";
 export const createUser = async (request: Request, response: Response) => {
   try {
     const {name, email, password} = request.body
 
-    const checkUserMail: IUser | void = await getUserHandler(getUserByMail, [email])
+    const checkUserMail: IUser | void = await getUserHandler(email)
 
     if (
       typeof checkUserMail === 'object' &&
@@ -28,14 +30,13 @@ export const createUser = async (request: Request, response: Response) => {
     console.log(`Error is create: `, error)
     throw error
   }
-
 }
 
-const loginUser = async (request: Request, response: Response) => {
+export const loginUser = async (request: Request, response: Response) => {
   try {
-    const { name, email, password }: IUser = request.body
+    const { email, password }: IUser = request.body
 
-    const checkUser: IUser | void = await getUserHandler(getUserByMail, [email])
+    const checkUser: IUser | void = await getUserHandler(email)
 
     if (typeof checkUser === 'object') {
       if (Object.entries(checkUser).length === 0) {
@@ -43,6 +44,20 @@ const loginUser = async (request: Request, response: Response) => {
       }
 
       const isPasswordIdentical = await bcrypt.compare(password, checkUser.password)
+
+      if (isPasswordIdentical) {
+        const token = getUserToken(checkUser.id)
+
+        return response.send({
+          token,
+          user: {
+            email: checkUser.email,
+            name: checkUser.name,
+          }
+        })
+      } else {
+        response.status(400).send({message: 'Invalid username or password'})
+      }
     }
 
   } catch (error) {
@@ -50,12 +65,20 @@ const loginUser = async (request: Request, response: Response) => {
   }
 }
 
-const getUserHandler = async (query: string, array: unknown[]) => {
-  return db
-    .query(query, array)
+const getUserToken = (_id: number | Types.ObjectId) => {
+   const authUserToken = jsw.sign({_id}, "express", {
+     expiresIn: '7d'
+   })
+
+  return authUserToken
+}
+
+const getUserHandler = async (email: string) => {
+  return await db
+    .query(getUserByMail, [email])
     .then((result) => {
       const answer: IUser = result.rows[0]
       return answer
     })
-    .catch(((error) => console.log(error)))
+    .catch((error) => throws (error))
 }
